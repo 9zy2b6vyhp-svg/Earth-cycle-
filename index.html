@@ -82,7 +82,9 @@
   .today-line{font-size:13px; color:var(--slate); font-style:italic; margin-bottom:6px;}
   .today-value{font-family:'Cinzel',serif; font-size:21px; font-weight:600; line-height:1.4; margin-bottom:4px; color:var(--forest);}
   .today-value .holiday-tag{display:block; font-size:14px; color:var(--rust); font-weight:600; margin-top:3px; font-family:'EB Garamond'; letter-spacing:0.5px;}
-  .today-gaelic{color:var(--slate); font-size:13px; margin-bottom:14px; font-style:italic;}
+  .today-gaelic{color:var(--slate); font-size:13px; margin-bottom:6px; font-style:italic;}
+  .today-sun{color:var(--forest); font-size:12px; margin-bottom:14px; display:flex; gap:8px; flex-wrap:wrap;}
+  .today-sun .shower-chip{color:#5A3F8A; font-weight:600;}
   .goto-today{
     background:var(--forest); color:var(--parchment); border:none; padding:9px 18px;
     border-radius:20px; font-family:'Cinzel'; font-weight:600; font-size:11.5px; letter-spacing:1px;
@@ -153,7 +155,24 @@
   .moon-badge{
     display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#8A6620;
     background:rgba(184,137,46,0.1); border:1px solid rgba(184,137,46,0.35);
-    border-radius:20px; padding:4px 10px; margin:8px 0 16px;
+    border-radius:20px; padding:4px 10px; margin:8px 8px 4px 0;
+  }
+  .sun-tide-row{margin:0 0 16px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
+  .sun-chip{
+    display:inline-flex; align-items:center; gap:5px; font-size:12px; color:var(--forest);
+    background:rgba(47,74,52,0.08); border:1px solid rgba(47,74,52,0.25);
+    border-radius:20px; padding:4px 10px;
+  }
+  .tide-link{
+    display:inline-flex; align-items:center; gap:5px; font-size:12px; color:var(--slate);
+    background:var(--parchment); border:1px solid var(--line); border-radius:20px; padding:4px 10px;
+    text-decoration:none;
+  }
+  .tide-link:hover{border-color:var(--slate);}
+  .sun-tide-note{width:100%; font-size:10.5px; color:var(--slate); font-style:italic; margin-top:2px;}
+  .shower-banner{
+    width:100%; background:rgba(88,63,138,0.1); border:1px solid rgba(88,63,138,0.3);
+    color:#5A3F8A; border-radius:8px; padding:6px 10px; font-size:12px; margin-top:2px;
   }
   .field-group{margin-bottom:14px;}
   .field-group label{display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:0.8px; color:var(--slate); margin-bottom:5px; font-family:'IBM Plex Mono';}
@@ -229,6 +248,7 @@
       <div class="today-line">Where are we in the living year?</div>
       <div class="today-value" id="todayValue">&mdash;</div>
       <div class="today-gaelic" id="todayGaelic"></div>
+      <div class="today-sun" id="todaySun"></div>
       <button class="goto-today" id="gotoToday">Jump to Today</button>
     </div>
   </div>
@@ -286,6 +306,7 @@
     <h3 id="npTitle">Day</h3>
     <div class="np-sub" id="npSub"></div>
     <div class="moon-badge" id="moonBadge"></div>
+    <div class="sun-tide-row" id="sunTideRow"></div>
 
     <div class="section-label">Observations</div>
     <div class="field-row">
@@ -378,6 +399,154 @@
     const idx = Math.round((phase/synodic)*8) % 8;
     return names[idx];
   }
+
+  // ---- Sun times for Tramore, Co. Waterford (52.1531N, 7.1242W) ----
+  const SUN_LAT = 52.1531, SUN_LON = -7.1242;
+  const TIDE_INFO_URL = 'https://www.tidetime.org/europe/ireland/tramore.htm';
+  const SRAD = Math.PI/180, DAY_MS = 86400000, J1970 = 2440588, J2000 = 2451545;
+  const OBLIQUITY = SRAD*23.4397;
+  function toJulian(date){ return date.valueOf()/DAY_MS - 0.5 + J1970; }
+  function fromJulian(j){ return new Date((j+0.5-J1970)*DAY_MS); }
+  function toDays(date){ return toJulian(date) - J2000; }
+  function solarMeanAnomaly(d){ return SRAD*(357.5291+0.98560028*d); }
+  function eclipticLongitude(M){
+    const C = SRAD*(1.9148*Math.sin(M)+0.02*Math.sin(2*M)+0.0003*Math.sin(3*M));
+    const P = SRAD*102.9372;
+    return M+C+P+Math.PI;
+  }
+  function declination(l){ return Math.asin(Math.sin(l)*Math.sin(OBLIQUITY)); }
+  function julianCycle(d, lw){ return Math.round(d - 0.0009 - lw/(2*Math.PI)); }
+  function approxTransit(Ht, lw, n){ return 0.0009 + (Ht+lw)/(2*Math.PI) + n; }
+  function solarTransitJ(ds, M, L){ return J2000 + ds + 0.0053*Math.sin(M) - 0.0069*Math.sin(2*L); }
+  function hourAngle(h, phi, d){ return Math.acos((Math.sin(h)-Math.sin(phi)*Math.sin(d))/(Math.cos(phi)*Math.cos(d))); }
+
+  function getSunTimes(date, lat, lng){
+    const lw = SRAD*(-lng), phi = SRAD*lat;
+    const d = toDays(date);
+    const n = julianCycle(d, lw);
+    const ds = approxTransit(0, lw, n);
+    const M = solarMeanAnomaly(ds);
+    const L = eclipticLongitude(M);
+    const dec = declination(L);
+    const Jnoon = solarTransitJ(ds, M, L);
+    const h0 = SRAD*(-0.833);
+    let w;
+    try { w = hourAngle(h0, phi, dec); } catch(e){ w = NaN; }
+    if(isNaN(w)) return null; // polar day/night edge case, not relevant at this latitude
+    const a = approxTransit(w, lw, n);
+    const Jset = solarTransitJ(a, M, L);
+    const Jrise = Jnoon - (Jset - Jnoon);
+    return { sunrise: fromJulian(Jrise), sunset: fromJulian(Jset) };
+  }
+  function formatClock(date){
+    return date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  }
+  function dayLengthLabel(sunTimes){
+    if(!sunTimes) return '—';
+    const mins = Math.round((sunTimes.sunset - sunTimes.sunrise)/60000);
+    return `${Math.floor(mins/60)}h ${mins%60}m`;
+  }
+  function dayLengthTrend(date){
+    const today = getSunTimes(date, SUN_LAT, SUN_LON);
+    const yesterday = getSunTimes(new Date(date.getTime()-DAY_MS), SUN_LAT, SUN_LON);
+    if(!today || !yesterday) return '';
+    const t1 = (today.sunset-today.sunrise), t0 = (yesterday.sunset-yesterday.sunrise);
+    const diffSec = Math.round((t1-t0)/1000);
+    if(diffSec > 0) return `+${diffSec}s daylight vs yesterday`;
+    if(diffSec < 0) return `${diffSec}s daylight vs yesterday`;
+    return 'same length as yesterday';
+  }
+
+  // ---- Moonrise / Moonset (search-based, since the Moon's motion has no simple closed form) ----
+  function rightAscension(l,b){ return Math.atan2(Math.sin(l)*Math.cos(OBLIQUITY)-Math.tan(b)*Math.sin(OBLIQUITY), Math.cos(l)); }
+  function moonDeclination(l,b){ return Math.asin(Math.sin(b)*Math.cos(OBLIQUITY)+Math.cos(b)*Math.sin(OBLIQUITY)*Math.sin(l)); }
+  function siderealTime(d, lw){ return SRAD*(280.16+360.9856235*d) - lw; }
+  function moonCoords(d){
+    const L = SRAD*(218.316+13.176396*d);
+    const M = SRAD*(134.963+13.064993*d);
+    const F = SRAD*(93.272+13.229350*d);
+    const l = L + SRAD*6.289*Math.sin(M);
+    const b = SRAD*5.128*Math.sin(F);
+    const dt = 385001 - 20905*Math.cos(M);
+    return { ra: rightAscension(l,b), dec: moonDeclination(l,b), dist: dt };
+  }
+  function hoursLater(date, h){ return new Date(date.valueOf() + h*3600000); }
+  function getMoonAltitude(date, lat, lng){
+    const lw = SRAD*(-lng), phi = SRAD*lat, d = toDays(date);
+    const c = moonCoords(d);
+    const H = siderealTime(d, lw) - c.ra;
+    let h = Math.asin(Math.sin(phi)*Math.sin(c.dec) + Math.cos(phi)*Math.cos(c.dec)*Math.cos(H));
+    const pxDist = 6378.137/c.dist;
+    return h + Math.cos(h)*pxDist;
+  }
+  function getMoonTimes(date, lat, lng){
+    const t = new Date(date); t.setHours(0,0,0,0);
+    const hc = 0.133*SRAD;
+    let h0 = getMoonAltitude(t, lat, lng) - hc;
+    let rise, set, ye;
+    for(let i=1;i<=24;i+=2){
+      const h1 = getMoonAltitude(hoursLater(t,i), lat, lng) - hc;
+      const h2 = getMoonAltitude(hoursLater(t,i+1), lat, lng) - hc;
+      const a = (h0+h2)/2 - h1;
+      const b = (h2-h0)/2;
+      const xe = -b/(2*a);
+      ye = (a*xe+b)*xe+h1;
+      const d = b*b - 4*a*h1;
+      let roots = 0, x1, x2;
+      if(d>=0){
+        const dx = Math.sqrt(d)/(Math.abs(a)*2);
+        x1 = xe-dx; x2 = xe+dx;
+        if(Math.abs(x1)<=1) roots++;
+        if(Math.abs(x2)<=1) roots++;
+        if(x1<-1) x1=x2;
+      }
+      if(roots===1){
+        if(h0<0) rise = i+x1; else set = i+x1;
+      } else if(roots===2){
+        rise = i + (ye<0 ? x2 : x1);
+        set = i + (ye<0 ? x1 : x2);
+      }
+      if(rise!==undefined && set!==undefined) break;
+      h0 = h2;
+    }
+    const result = {};
+    if(rise!==undefined) result.rise = hoursLater(t, rise);
+    if(set!==undefined) result.set = hoursLater(t, set);
+    if(rise===undefined && set===undefined) result[ye>0?'alwaysUp':'alwaysDown'] = true;
+    return result;
+  }
+  function moonTimesLabel(date){
+    const mt = getMoonTimes(date, SUN_LAT, SUN_LON);
+    const parts = [];
+    parts.push(mt.rise ? `🌒 ${formatClock(mt.rise)}` : (mt.alwaysDown ? '🌒 below horizon' : '🌒 —'));
+    parts.push(mt.set ? `🌘 ${formatClock(mt.set)}` : (mt.alwaysUp ? '🌘 above all day' : '🌘 —'));
+    return parts;
+  }
+
+  // ---- Meteor showers (approximate annual peak dates, Gregorian) ----
+  const METEOR_SHOWERS = [
+    {name:'Quadrantids', month:1, day:3},
+    {name:'Lyrids', month:4, day:22},
+    {name:'Eta Aquariids', month:5, day:5},
+    {name:'Perseids', month:8, day:12},
+    {name:'Draconids', month:10, day:8},
+    {name:'Orionids', month:10, day:21},
+    {name:'Leonids', month:11, day:17},
+    {name:'Geminids', month:12, day:13},
+    {name:'Ursids', month:12, day:22}
+  ];
+  function meteorShowerNear(gregDate){
+    const y = gregDate.getFullYear();
+    const dayOnly = new Date(y, gregDate.getMonth(), gregDate.getDate());
+    for(const s of METEOR_SHOWERS){
+      const peak = new Date(y, s.month-1, s.day);
+      const diff = Math.round((dayOnly - peak)/DAY_MS);
+      if(Math.abs(diff) <= 1) return {name:s.name, diff};
+    }
+    return null;
+  }
+
+  const SEA_TEMP_URL = 'https://swimtramore.com/';
 
   let state = { epochYear: null, selectedMonth: 1 };
 
@@ -527,6 +696,18 @@
     const pos = positionInCycle(now, state.epochYear);
     const el = document.getElementById('todayValue');
     const gEl = document.getElementById('todayGaelic');
+    const sunEl = document.getElementById('todaySun');
+    const st = getSunTimes(now, SUN_LAT, SUN_LON);
+    const moon = moonTimesLabel(now);
+    const trend = dayLengthTrend(now);
+    const shower = meteorShowerNear(now);
+    let sunHtml = st
+      ? `<span>🌅 ${formatClock(st.sunrise)}</span><span>🌇 ${formatClock(st.sunset)}</span><span>⏱ ${dayLengthLabel(st)}</span><span>${trend}</span><span>${moon[0]}</span><span>${moon[1]}</span>`
+      : '';
+    if(shower){
+      sunHtml += `<span class="shower-chip">🌠 ${shower.name} ${shower.diff===0?'peaks tonight':(shower.diff<0?'peaked':'peaks tomorrow')}</span>`;
+    }
+    sunEl.innerHTML = sunHtml;
     if(pos.kind==='month'){
       const h = holidayForDoy(pos.doy);
       const mo = MONTHS[pos.month-1];
@@ -608,6 +789,28 @@
     return entry;
   }
 
+  function renderSunTideRow(gregDate){
+    const st = getSunTimes(gregDate, SUN_LAT, SUN_LON);
+    const moon = moonTimesLabel(gregDate);
+    const trend = dayLengthTrend(gregDate);
+    const shower = meteorShowerNear(gregDate);
+    const row = document.getElementById('sunTideRow');
+
+    const sunHtml = st
+      ? `<span class="sun-chip">🌅 ${formatClock(st.sunrise)}</span><span class="sun-chip">🌇 ${formatClock(st.sunset)}</span><span class="sun-chip">⏱ ${dayLengthLabel(st)}</span><span class="sun-chip">${trend}</span>`
+      : '';
+    const moonHtml = `<span class="sun-chip">${moon[0]}</span><span class="sun-chip">${moon[1]}</span>`;
+    const showerHtml = shower
+      ? `<div class="shower-banner">🌠 ${shower.name} meteor shower ${shower.diff===0 ? 'peaks today' : (shower.diff<0 ? 'peaked yesterday' : 'peaks tomorrow')} — best after dark, away from lights</div>`
+      : '';
+
+    row.innerHTML = sunHtml + moonHtml +
+      `<a class="tide-link" href="${TIDE_INFO_URL}" target="_blank" rel="noopener">🌊 Tramore tides ↗</a>` +
+      `<a class="tide-link" href="${SEA_TEMP_URL}" target="_blank" rel="noopener">🌡️ Sea temp & swim ↗</a>` +
+      showerHtml +
+      `<span class="sun-tide-note">Sun/moon times calculated for Tramore, Co. Waterford. Tide and sea temperature links open real data — not suitable for navigation.</span>`;
+  }
+
   async function openNoteForDay(month, day){
     noteCtx = {kind:'month', month, day};
     const doy = monthDayToDayOfYear(month, day);
@@ -615,7 +818,9 @@
     const mo = MONTHS[month-1];
     document.getElementById('npTitle').textContent = `${mo.gaelic}, Day ${day}`;
     document.getElementById('npSub').textContent = h ? `${h.icon} ${h.name}` : `Month ${mo.roman} — ${mo.english}`;
-    document.getElementById('moonBadge').textContent = '🌙 ' + moonPhase(gregorianForDoy(state.epochYear, doy));
+    const gregDate = gregorianForDoy(state.epochYear, doy);
+    document.getElementById('moonBadge').textContent = '🌙 ' + moonPhase(gregDate);
+    renderSunTideRow(gregDate);
     const notes = await getMonthNotes(state.epochYear, `M${month}`);
     fillFields(notes[day]);
     document.getElementById('overlay').classList.add('open');
@@ -626,7 +831,9 @@
     const doyLike = kind==='yearday' ? YEAR_DAYS+1 : YEAR_DAYS+2;
     document.getElementById('npTitle').textContent = kind==='yearday' ? 'Year Day' : 'Leap Day';
     document.getElementById('npSub').textContent = 'Outside the months — reflection, gratitude, renewal';
-    document.getElementById('moonBadge').textContent = '🌙 ' + moonPhase(gregorianForDoy(state.epochYear, doyLike));
+    const gregDate = gregorianForDoy(state.epochYear, doyLike);
+    document.getElementById('moonBadge').textContent = '🌙 ' + moonPhase(gregDate);
+    renderSunTideRow(gregDate);
     const notes = await getMonthNotes(state.epochYear, kind.toUpperCase());
     fillFields(notes['1']);
     document.getElementById('overlay').classList.add('open');
@@ -691,3 +898,4 @@
 </script>
 </body>
 </html>
+
